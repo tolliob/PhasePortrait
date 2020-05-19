@@ -3,6 +3,6 @@ time
 os.path
 io
 matplotlib==3.*
-PIL==7.*
+pillow==7.*
 sqlite3==3.*
 ipywidgets==7.*
