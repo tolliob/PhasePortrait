@@ -1,4 +1,4 @@
 matplotlib==3.*
 pillow==7.*
-sqlite3
+sqlite==3.*
 ipywidgets==7.*
