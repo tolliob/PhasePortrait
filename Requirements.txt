@@ -1,8 +1,4 @@
-math
-time
-os.path
-io
 matplotlib==3.*
-pillow==7.*
+pillow
 sqlite3==3.*
 ipywidgets==7.*
