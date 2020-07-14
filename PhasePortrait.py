@@ -17,11 +17,13 @@
 # 15/05/20   Add the image representation as an attribute #
 # 18/05/20   Degub the expression of the complex number   #
 #            which have not been computed                 #
+# 10/07/20   Allows floating points in corner components  #
 #                                                         #
 # Next modifications to do:                               #
 # -------------------------                               #
 #                                                         #
-#   Check pylava
+#   Check pylava                                          #
+#   Add a few doctests                                    #
 #                                                         #
 ###########################################################
 
@@ -30,33 +32,10 @@ from Color import RGB
 from RiemannSphere import RiemannSphere
 from PIL import Image
 import sqlite3
-import math
+from math import gcd
+from fractions import Fraction
 from time import time
 import os.path
-
-
-def gcd(a, b, c):
-    """ Compute the greatest common divisor of three integers
-
-    :param a: int
-    :param b: int
-    :param c: int
-    :return: int, the greatest common divisor of the three integers a, b and c
-
-    >>> gcd(5, 15, 30)
-    5
-    >>> gcd(-2, 15, 30)
-    1
-    >>> gcd(3, -15, 30)
-    3
-    >>> gcd(1, 5, -10)
-    1
-    >>> gcd(-2, 8, -20)
-    2
-    >>> gcd(3, -9, -21)
-    3
-    """
-    return math.gcd(a, math.gcd(b, c))
 
 
 def convert(u, v, w):
@@ -146,7 +125,7 @@ class PhasePortrait:
     """
 
     def __init__(self, function, left_below, right_upper, resolution,
-                 information=False, database=""):
+                 information=False, database="", data_logger=None):
         """ Constructor of the class
         :param function: represents the function [a, b] + [c, d] * i -> C
                          whose phase portrait will be drawn
@@ -164,6 +143,8 @@ class PhasePortrait:
                          the function we are currently graphing ; if database
                          is non empty, we will use values already computing
                          and add some new ones
+        :param data_logger: logging.logging.Logger, which is a data logger
+                            to record information during computation
         """
         self.function = function
         self.left_below = left_below
@@ -172,16 +153,16 @@ class PhasePortrait:
         length_y = self.right_upper.imaginary - self.left_below.imaginary
         self.size = (int(length_x * resolution) + 1, int(length_y * resolution) + 1)
         self.resolution = resolution
-        min_x = int(self.left_below.real * resolution)
-        max_x = int(self.right_upper.real * resolution)
-        self.liste_x = [x for x in range(min_x, max_x + 1)]
-        min_y = int(self.left_below.imaginary * resolution)
-        max_y = int(self.right_upper.imaginary * resolution)
-        self.liste_y = [y for y in range(min_y, max_y + 1)]
+        self.liste_x = [self.left_below.real + Fraction(i, resolution)
+                        for i in range(int((self.right_upper.real - self.left_below.real) * resolution) + 1)]
+        self.liste_y = [self.left_below.imaginary + Fraction(i, resolution)
+                        for i in range(int((self.right_upper.imaginary - self.left_below.imaginary) * resolution) + 1)]
         self.database = database
+        self.data_logger = data_logger
         self.values = self.compute(resolution, information)
 
-    def recover_datas(self, resol, information):
+
+    def recover_datas(self, resol, information, connection, cursor):
         """ Recover datas already computed in the past and stored
         in the database of the current phase portrait
 
@@ -196,38 +177,41 @@ class PhasePortrait:
         :return value: a dictionnary whose keys/values described values already
                                computed of the current complex function
         """
-        # Initialisation
         values = {}
-        # Connection to the database
-        connection = sqlite3.connect(self.database)
-        cursor = connection.cursor()
         if information:
-            print()
-            print("**************************************")
-            print("* Recuperation des donnees en cours. *")
-            print("**************************************")
-            print()
-        t_0 = time()
-        if information:
-            print("Creation d'une table temporaire dans " +
-                  "la base de donnees :")
-            print("\tEn cours...")
+            text = "Loading datas in progress "
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
+            t_0 = time()
+            text = "Creation of a temporary table in the database " +\
+                   self.database + " "
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
         cursor.execute('''CREATE TABLE IF NOT EXISTS TMP(
                           multiplier INTEGER,
                           real INTEGER,
                           imaginary INTEGER);''')
         for y in self.liste_y:
             for x in self.liste_x:
-                tmp = gcd(resol, x, y)
+                lcm_tmp = abs(x.denominator * y.denominator) // gcd(x.denominator, y.denominator)
                 cursor.execute('''INSERT \
                                   INTO TMP(multiplier, real, imaginary) \
                                   VALUES (?, ?, ?)''',
-                               (resol / tmp, x / tmp, y / tmp,))
+                               (lcm_tmp, int(x * lcm_tmp), int(y * lcm_tmp),))
         connection.commit()
         if information:
             t_1 = time()
-            print("\tTerminee en " + str(t_1 - t_0) + "s")
-        t_0 = time()
+            str_time = str(int((t_1 - t_0) * 1000) / 1000) + "s. "
+            text = "Temporary table created in " + str_time
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
+            t_0 = time()
         SQL = "SELECT Zmultiplier, Zreal, Zimaginary, " + \
               "       Value.real, Value.imaginary, Value.infinite " + \
               "FROM Value " + \
@@ -242,10 +226,18 @@ class PhasePortrait:
         cursor.execute(SQL)
         if information:
             t_1 = time()
-            print("SELECT realise en ", t_1 - t_0, " s.")
-            print("Transformation des calculs deja fait " +
-                  "en nombres complexes :")
-            print("\tEn cours...")
+            str_time = str(int((t_1 - t_0) * 1000) / 1000) + " s. "
+            text = "Recovery of already computed values realised in " + str_time
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
+            text = "Transformation of the already done computations " + \
+                   "into complex numbers in progress. "
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
         computed_value = cursor.fetchone()
         nb_computed_values = 0
         while computed_value is not None:
@@ -255,31 +247,45 @@ class PhasePortrait:
             val_real, val_im, val_inf = convert(computed_value[3],
                                                 computed_value[4],
                                                 computed_value[5])
-            x = round((z_real / z_mult - self.left_below.real) * resol)
-            y = round((z_im / z_mult - self.left_below.imaginary) * resol)
-            values[x, y] = RiemannSphere(val_real, val_im, infinite=val_inf)
+            x = Fraction(z_real, z_mult)
+            y = Fraction(z_im, z_mult)
+            pixel = (self.liste_x.index(x), self.liste_y.index(y))
+            values[pixel] = RiemannSphere(val_real, val_im, infinite=val_inf)
             nb_computed_values += 1
             computed_value = cursor.fetchone()
         if information:
             t_2 = time()
             nb_of_values_to_compute = len(self.liste_x) * len(self.liste_y)
             proportion = nb_computed_values / nb_of_values_to_compute
-            print("\tTermine en " + str(t_2 - t_1) + "s.")
-            print(int(10000 * proportion) / 100,
-                  "% des donnees a calculer ont deja ete calculees " +
-                  "au par avant.")
+            str_time = str(int((t_2 - t_1) * 1000) / 1000) + "s. "
+            text = "Transformation into complex numbers finished in " + str_time
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
+            text = str(int(10000 * proportion) / 100) + \
+                  "% of the data to compute have already been computed. "
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
         cursor.execute('''DROP TABLE TMP;''')
         return values
 
-    def compute_a_value(self, x, y, resol, values, cursor):
+    def compute_a_value(self, z, pixel, resol, values, cursor):
         """ Compute the image of the current complex function at
-        the Riemann shpere complex number z = x + i y.
+        the Riemann sphere complex number z = x + i y and save it in the values dictionary.
 
-        :param resol: resolution value used to discretised the rectangle
-                               [a, b] + [c, d] * i such that there will be
-                               (resol + 1)^2 points in a square of area 1
+        :param z: RiemannSphere complex number
+        :param pixel: tuple of int, which represents the coordinates of
+                      the colored pixel by the value of the current complex
+                      function at the Riemannspphere complex number z
         :param values: dictionnary whose keys/values described values already
-                               computed of the current complex function
+                               computed of the current complex function.
+                               Keys are tuples which represents coordinates of
+                               pixels, while values are the computed values of
+                               the current function at the Riemann sphere
+                               complex number z
         :param cursor: Cursor object, created after being connected to
                          a sqlite3 database containing values of the function
                          we are currently graphing, used to add the complex
@@ -289,29 +295,32 @@ class PhasePortrait:
         with the cursor object, during the execution of the compute_a_value
         function
         """
-        x_pixel = round(x - self.left_below.real * resol)
-        y_pixel = round(y - self.left_below.imaginary * resol)
-        z = RiemannSphere(x / resol, y / resol)
         try:
-            values[x_pixel, y_pixel] = self.function(z)
-            gcd_tmp = gcd(resol, x, y)
-            cursor.execute('''INSERT
-                              INTO Z(multiplier, real, imaginary, infinite)
-                              VALUES (?, ?, ?, ?)''', (resol / gcd_tmp,
-                                                       x / gcd_tmp,
-                                                       y / gcd_tmp, 0,))
-            if values[x_pixel, y_pixel].is_infinite():
-                infty = 1
+            values[pixel] = self.function(z)
+            if self.database != "":
+                lcm_tmp = int(abs(z.real.denominator * z.imaginary.denominator) // gcd(z.real.denominator,
+                                                                                       z.imaginary.denominator))
+                cursor.execute('''INSERT
+                                  INTO Z(multiplier, real, imaginary, infinite)
+                                  VALUES (?, ?, ?, ?)''', (lcm_tmp,
+                                                           int(z.real * lcm_tmp),
+                                                           int(z.imaginary * lcm_tmp), 0,))
+                if values[pixel].is_infinite():
+                    infty = 1
+                else:
+                    infty = 0
+                cursor.execute('''INSERT INTO Value(real, imaginary, infinite)
+                                      VALUES (?, ?, ?)''',
+                               (float(values[pixel].real),
+                                float(values[pixel].imaginary),
+                                infty,))
+        except ValueError:
+            text = "Pixel " + str(pixel) + " has no value: " + \
+                   "the image of z = " + str(z) + " has not been computed "
+            if self.data_logger is None:
+                print(text)
             else:
-                infty = 0
-            cursor.execute('''INSERT INTO Value(real, imaginary, infinite)
-                              VALUES (?, ?, ?)''',
-                           (values[x_pixel, y_pixel].real,
-                            values[x_pixel, y_pixel].imaginary,
-                            infty,))
-        except ValueError as exception:
-            print("z = ", z, " - pixel", (x_pixel, y_pixel),
-                  "non calcule :", exception)
+                self.data_logger.exception(text)
 
     def compute(self, resol, information):
         """ Compute all the images of the current complex function we want
@@ -327,11 +336,6 @@ class PhasePortrait:
                                which indicates if the user wants to see
                                the progression of the calculation in order
                                to produce the image
-        :param database: String, which is by default empty, which indicate
-                         the path of a database containing values of
-                         the function we are currently graphing ; if database
-                         is non empty, we will use values already computing
-                         and add some new ones
 
         :Return value: a dictionnary whose key are the complex number of
                        discretised rectangle [a, b] + [c, d] * i and the values
@@ -339,10 +343,21 @@ class PhasePortrait:
                        function
         """
         if os.path.isfile(self.database):
+            # Connection to the database
+            connection = sqlite3.connect(self.database)
+            cursor = connection.cursor()
             # Look back datas in the database
-            values = self.recover_datas(resol, information)
-        else:
-            # Create the database to store the computed values
+            values = self.recover_datas(resol, information, connection, cursor)
+            # Look for values to compute
+            values_keys = values.keys()
+            dict_x = {str(self.liste_x[pos]): pos for pos in range(len(self.liste_x))}
+            dict_y = {str(self.liste_y[pos]): pos for pos in range(len(self.liste_y))}
+            to_compute = [(x, y) for x in self.liste_x for y in self.liste_y
+                          if (dict_x[str(x)], dict_y[str(y)]) not in values_keys]
+#            to_compute = [(x, y) for x in self.liste_x for y in self.liste_y
+#                          if (self.liste_x.index(x), self.liste_y.index(y)) not in values_keys]
+        elif self.database != "":
+            # Create the dictionnary to store the computed values
             values = {}
             # Connection to the database
             connection = sqlite3.connect(self.database)
@@ -358,18 +373,21 @@ class PhasePortrait:
                                  real FLOAT,
                                  imaginary FLOAT,
                                  infinite BOOLEAN);''')
+            # Look for values to compute
+            to_compute = [(x, y) for x in self.liste_x for y in self.liste_y]
+        else:
+            # Look for values to compute
+            to_compute = [(x, y) for x in self.liste_x for y in self.liste_y]
+            # Create the dictionnary to store the computed values
+            values = {}
+            # False database connection variable
+            cursor = None
         # Computation of the necessary values
         if information:
-            print()
-            print("*********************")
-            print("* calcul en cours : *")
-            print("*********************")
-            print()
-        values_keys = values.keys()
-        to_compute = [(x, y) for x in self.liste_x for y in self.liste_y
-                      if (round(x - self.left_below.real * resol),
-                          round(y - self.left_below.imaginary * resol))
-                      not in values_keys]
+            if self.data_logger is None:
+                print("Preliminary computations have started")
+            else:
+                self.data_logger.info("Preliminary computations have started ")
         lenght = len(to_compute)
         one_half_per_cent = int(lenght / 200)
         if one_half_per_cent == 0:
@@ -377,21 +395,35 @@ class PhasePortrait:
         t_0 = time()
         nb_of_element = 0
         for (x, y) in to_compute:
-            self.compute_a_value(x, y, resol, values, cursor)
+            z = RiemannSphere(x, y)
+            pixel = (self.liste_x.index(x), self.liste_y.index(y))
+            self.compute_a_value(z, pixel, resol, values, cursor)
             nb_of_element += 1
             if nb_of_element % one_half_per_cent == 0:
                 if information:
                     t_1 = time()
-                    pourcentage = int(10000 * nb_of_element / lenght) / 100
-                    print(str(pourcentage) +
-                          "% realisé en " + str(int((t_1 - t_0) * 1000) / 1000) + "s.")
-                connection.commit()
-        connection.commit()
-        cursor.close()
+                    per_cent = str(int(10000 * nb_of_element / lenght) / 100)
+                    str_time = str(int((t_1 - t_0) * 1000) / 1000) + "s. "
+                    text = "% of computations realised in "
+                    if self.data_logger is None:
+                        print(per_cent + text + str_time)
+                    else:
+                        self.data_logger.info(per_cent + text + str_time)
+                if self.database != "":
+                    connection.commit()
+        if self.database != "":
+            connection.commit()
+            cursor.close()
         if information:
-            print("*****************")
-            print("SORTIE DE CALCULS")
-            print("*****************")
+            if self.data_logger is None:
+                print("Preliminary computations are finished ")
+            else:
+                self.data_logger.info("Preliminary computations are finished ")
+        else:
+            if self.data_logger is None:
+                print("Computations finished ")
+            else:
+                self.data_logger.info("Computation finished ")
         return values
 
     def draw(self, information=False):
@@ -402,47 +434,60 @@ class PhasePortrait:
         :param name: name of the .bmp file
         :return value: Image
         """
-        size = self.size
-        img = Image.new('RGB', size, "white")      # create a new black image
-        pixels = img.load()                        # create the pixel map
+        img = Image.new('RGB', self.size, "white")      # create a new black image
+        pixels = img.load()                             # create the pixel map
         if information:
-            print()
-            print("********************************")
-            print("* Calcul des couleurs en cours *")
-            print("********************************")
-            print()
+            text = "Preliminary color computations have started "
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
         t_0 = time()
+        five_per_cent = int(5 * img.size[0] / 100)
         for i in range(img.size[0]):
             for j in range(img.size[1]):
                 # for every pixel, set the colour accordingly
                 try:
                     image_of_z = self.values[i, self.size[1] - j - 1]
-#                    print("i = ", i, "j = ", j, "z = ", z)
                     pixels[i, j] = RGB(image_of_z)
                 except KeyError:
-                    z = RiemannSphere(self.left_below.real + i / self.resolution,
-                                      self.right_upper.imaginary - j / self.resolution)
-                    print("z = " + str(z) + " correspond au pixel (" + str(i) + ', ' + str(self.size[1] - j - 1) + ").")
-                    print("Son image n'a pas été calculé")
-            if information and i % 100 == 9:
+                    re = self.left_below.real + Fraction(i, self.resolution)
+                    im = self.right_upper.imaginary - Fraction(j, self.resolution)
+                    z = RiemannSphere(re, im)
+                    coords = str(i) + ', ' + str(self.size[1] - j - 1)
+                    text = "Pixel (" + coords + ") has no computed valued: " +\
+                           "it is related to z = " + str(z) + " "
+                    if self.data_logger is None:
+                        print(text)
+                    else:
+                        self.data_logger.error(text)
+            if information and five_per_cent != 0 and i % five_per_cent == five_per_cent - 1:
                 t_1 = time()
-                print(str(100. * (i + 1) / (img.size[0] + 1)) +
-                      "% realisé en " + str(int((t_1 - t_0) * 1000) / 1000) + "s")
+                per_cent = str(int(10000. * (i + 1) / (img.size[0] + 1)) / 100)
+                time_str = str(int((t_1 - t_0) * 1000) / 1000) + "s"
+                text = " of color computations realised in "
+                if self.data_logger is None:
+                    print(per_cent + "%" + text + time_str)
+                else:
+                    self.data_logger.info(per_cent + "%" + text + time_str + " ")
+        if information:
+            if self.data_logger is None:
+                print("Color computations are finished")
+            else:
+                self.data_logger.info("Color computations are finished ")
         self.img = img
 
     def save(self, directory, name, information=False):
         if information:
             t_0 = time()
-            print()
-            print("*************************")
-            print("* sauvegarde de l'image *")
-            print("*************************")
-            print()
         self.img.save(directory + name, format="png")
         if information:
             t_1 = time()
-            print("sauvegarde de l'image effectuée en " + str(int((t_1 - t_0) * 1000) / 1000) + "s")
-            print()
+            text = "Image saved in " + str(int((t_1-t_0) * 1000) / 1000) + "s "
+            if self.data_logger is None:
+                print(text)
+            else:
+                self.data_logger.info(text)
 
 
 if __name__ == '__main__':
