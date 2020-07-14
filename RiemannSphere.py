@@ -1,28 +1,31 @@
-##########################################################
-# Module to define the Riemann Sphere complex numbers    #
-#                                                        #
-# Author: Olivier Bouillot                               #
-# Email: olivier.bouillot@u-pem.fr                       #
-# Creation Date: july 2017                               #
-#                                                        #
-# Modifications:                                         #
-# --------------                                         #
-#                                                        #
-# 03/2020    Modifies docstring and doctest              #
-#            Emulates numeric types                      #
-# 04/04/20   Take into account pylava warnings           #
-# 17/04/20   The flag infinite becomes optionnal         #
-#                                                        #
-# Next modifications to do:                              #
-# -------------------------                              #
-#                                                        #
-# .                                                      #
-#                                                        #
-##########################################################
+###########################################################
+# Module to define the Riemann Sphere complex numbers     #
+#                                                         #
+# Author: Olivier Bouillot                                #
+# Email: olivier.bouillot@u-pem.fr                        #
+# Creation Date: july 2017                                #
+#                                                         #
+# Modifications:                                          #
+# --------------                                          #
+#                                                         #
+# 03/2020    Modifies docstring and doctest               #
+#            Emulates numeric types                       #
+# 04/04/20   Take into account pylava warnings            #
+# 17/04/20   The flag infinite becomes optionnal          #
+# 10/07/20   Allow instanciation with Fraction components #
+#                                                         #
+# Next modifications to do:                               #
+# -------------------------                               #
+#                                                         #
+#   * Add doctests                                        #
+#   * Explicit some part of the doc                       #
+#                                                         #
+###########################################################
 
 
 from math import sqrt, atan, exp, log, cos, sin, pi
 from math import isnan, isinf
+from fractions import Fraction
 
 
 """ Module which defines:
@@ -36,14 +39,14 @@ class RiemannSphere(object):
     The main difference with the complex plan is that a RiemannSphere complex
     number can be infinite.
 
-    :attribute real: int, float, NaN
-    :attribute imaginary: int float, NaN
+    :attribute real: int, float, Fraction, NaN
+    :attribute imaginary: int float, Fraction, NaN
     :attribute infinite: boolean
 
     When initialized a RiemannSphere complex number is one of the following
     forms:
-    * int/float, int/float, False   <->   standart RiemannSphere complex number
-    * NaN, NaN, True                <->   infinite RiemannSphere complex number
+    * int/float/Fraction, int/float/Fraction, False   <->   standart RiemannSphere complex number
+    * NaN, NaN, True                                  <->   infinite RiemannSphere complex number
 
     If the usual operations can not be perform on RiemannSphere complex
     numbers, because of an infinite RiemannSphere complex number,
@@ -116,10 +119,10 @@ class RiemannSphere(object):
             self.imaginary = float('NaN')
             self.infinite = True
         else:
-            if not isinstance(real, (float, int)) or \
-                    not isinstance(imaginary, (float, int)):
+            if not isinstance(real, (int, float, Fraction)) or \
+                    not isinstance(imaginary, (int, float, Fraction)):
                 raise TypeError("Components of RiemannSphere instance are " +
-                                "integers or floats")
+                                "integers, floats or Fractions")
             if isnan(real) or isnan(imaginary):
                 raise ValueError("A complex number with a NaN component has " +
                                  "to be infinite!")
@@ -944,8 +947,8 @@ class RiemannSphere(object):
         if self.is_null() or isinf(1 / m):
             return INFTY
         else:
-            m2 = m**2
-            return RiemannSphere(self.real / m2, - self.imaginary / m2)
+            m_sq = self.__abs_square__()
+            return RiemannSphere(self.real / m_sq, - self.imaginary / m_sq)
 
     def __truediv__(self, other):
         """ Compute the division of the current RiemannSphere
@@ -989,7 +992,7 @@ class RiemannSphere(object):
                                  "by a null number!")
             else:
                 return self * other.inverse()
-        elif isinstance(other, (int, float)):
+        elif isinstance(other, (int, float, Fraction)):
             if other == 0:
                 raise ValueError("Can not compute a division " +
                                  "by a null number!")
@@ -997,7 +1000,7 @@ class RiemannSphere(object):
                 return self * (1 / other)
         else:
             raise TypeError("A RiemannSphere can only be divided by " +
-                            "a RiemannSphere number, an integer or a float")
+                            "a RiemannSphere number, an integer, a float or a Fraction")
 
     def __rtruediv__(self, other):
         """ Compute the division of a RiemannSphere, an integer or a float
@@ -1041,14 +1044,14 @@ class RiemannSphere(object):
                                  "by a null number!")
             else:
                 return other * self.inverse()
-        elif isinstance(other, (int, float)):
+        elif isinstance(other, (int, float, Fraction)):
             if self.is_null():
                 raise ValueError("Can not compute a division " +
                                  "by a null number!")
             else:
                 return other * self.inverse()
         else:
-            raise TypeError("Only a RiemannSphere, an integer or a float " +
+            raise TypeError("Only a RiemannSphere, an integer, a float or a Fraction " +
                             "can be divided by a RiemannSphere number")
 
     def __floordiv__(self, other):
@@ -1335,6 +1338,36 @@ class RiemannSphere(object):
             return float('Inf')
         else:
             return sqrt(self.real**2 + self.imaginary**2)
+
+    def __abs_square__(self):
+        """ Compute the module of the current complex number, ie the distance
+        between it and 0
+
+        :Return value: Float or float('Inf')
+
+        >>> epsilon = 0.01
+        >>> a = RiemannSphere(0, 0)
+        >>> b = RiemannSphere(1, 2)
+        >>> c = RiemannSphere(-2, 1)
+        >>> d = RiemannSphere(-2, -1)
+        >>> e = RiemannSphere(2, -1)
+        >>> abs(a)
+        0.0
+        >>> abs(abs(b) - sqrt(5)) <= epsilon
+        True
+        >>> abs(abs(c) - sqrt(5)) <= epsilon
+        True
+        >>> abs(abs(d) - sqrt(5)) <= epsilon
+        True
+        >>> abs(abs(e) - sqrt(5)) <= epsilon
+        True
+        >>> abs(INFTY)
+        inf
+        """
+        if self.is_infinite():
+            return float('Inf')
+        else:
+            return self.real**2 + self.imaginary**2
 
     def __invert__(self):
         raise NotImplementedError
