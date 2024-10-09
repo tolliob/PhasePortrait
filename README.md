@@ -10,7 +10,7 @@ __**Files:**__
 * Color:                Module to convert Riemann Sphere complex numbers to
                         a color using the HLS model or the RGB model
 
-* RienmannSphere:       Module to define the Riemann Sphere complex numbers
+* RiemmannSphere:       Module to define the Riemann Sphere complex numbers
 
 * PhasePortrait:        Module to draw phase portrait of function defined
                         in a part of the complex plane, and valued in the
